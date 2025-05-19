@@ -41,3 +41,40 @@ register(
     entry_point="gym_lowcostrobot.envs:PushCubeLoopEnv",
     max_episode_steps=50,
 )
+
+# Register with gym_lowcostrobot prefix
+register(
+    id="gym_lowcostrobot/LiftCube-v0",
+    entry_point="gym_lowcostrobot.envs:LiftCubeEnv",
+    max_episode_steps=50,
+)
+
+register(
+    id="gym_lowcostrobot/PickPlaceCube-v0",
+    entry_point="gym_lowcostrobot.envs:PickPlaceCubeEnv",
+    max_episode_steps=50,
+)
+
+register(
+    id="gym_lowcostrobot/PushCube-v0",
+    entry_point="gym_lowcostrobot.envs:PushCubeEnv",
+    max_episode_steps=50,
+)
+
+register(
+    id="gym_lowcostrobot/ReachCube-v0",
+    entry_point="gym_lowcostrobot.envs:ReachCubeEnv",
+    max_episode_steps=50,
+)
+
+register(
+    id="gym_lowcostrobot/StackTwoCubes-v0",
+    entry_point="gym_lowcostrobot.envs:StackTwoCubesEnv",
+    max_episode_steps=50,
+)
+
+register(
+    id="gym_lowcostrobot/PushCubeLoop-v0",
+    entry_point="gym_lowcostrobot.envs:PushCubeLoopEnv",
+    max_episode_steps=50,
+)

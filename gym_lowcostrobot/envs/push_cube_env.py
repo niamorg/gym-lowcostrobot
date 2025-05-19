@@ -116,6 +116,7 @@ class PushCubeEnv(Env):
             self.renderer = mujoco.Renderer(self.model)
         if self.observation_mode in ["state", "both"]:
             observation_subspaces["cube_pos"] = spaces.Box(low=-10.0, high=10.0, shape=(3,))
+            observation_subspaces["cube_vel"] = spaces.Box(low=-10.0, high=10.0, shape=(3,))
         self.observation_space = gym.spaces.Dict(observation_subspaces)
 
         self.control_decimation = n_substeps  # number of simulation steps per control step
@@ -148,6 +149,70 @@ class PushCubeEnv(Env):
         self.target_high[1] += 0.10
 
     def inverse_kinematics(
+        self,
+        ee_target_pos,
+        ee_site="end_effector_site",
+        num_dof=5,
+        # step=1,
+        lm_damping=0.005,
+        max_iter=20,
+        tolerance_err=0.005
+    ):
+        """
+        Computes the inverse kinematics for a robotic arm to reach the target end effector position.
+
+        :param ee_target_pos: numpy array of target end effector position [x, y, z]
+        :param ee_site: str, name of the end effector site
+        :param num_dof: int, number of degrees of freedom
+        :param step: float, step size for the iteration
+        :param lm_damping: float, regularization factor for the pseudoinverse computation
+        :param max_iter: int, maximum number of iterations
+        :param tolerance_err: float, tolerance error
+        :return: numpy array of target joint positions
+        """
+        # Save the true qpos to restore it after the inverse kinematics.
+        true_qpos = self.data.qpos.copy()
+
+        # View on the joint positions
+        q = self.data.qpos[:num_dof]
+
+        ee_id = self.model.site(ee_site).id        
+        jacp = np.zeros((3, self.model.nv))
+        
+        for iter in range(max_iter):
+            ee_pos = self.data.site(ee_id).xpos
+            error = ee_target_pos - ee_pos
+            error_norm = np.linalg.norm(error)
+
+            # Stop iterations
+            if error_norm < tolerance_err:
+                break
+
+            # Jacobian
+            mujoco.mj_jacSite(self.model, self.data, jacp, None, ee_id)
+
+            # Damped least squares (Levenberg-Marquardt Algorithm)       
+            J = jacp[:, :num_dof]
+            temp = J @ J.T + lm_damping * np.eye(error.size)
+            qdot = np.linalg.solve(temp, error).dot(J)
+
+            # Compute the new joint positions. Integrate joint velocities to obtain joint positions.
+            q += qdot # * step
+
+            # Check limits
+            np.clip(q, *self.model.jnt_range[:num_dof].T, out=q)
+            
+            mujoco.mj_fwdPosition(self.model, self.data)
+
+        q_target_pos = q.copy()
+
+        # Restore the true qpos
+        self.data.qpos = true_qpos
+        mujoco.mj_fwdPosition(self.model, self.data)
+
+        return q_target_pos #, error_norm, (error_norm < tolerance_err), ee_pos, iter
+
+    def inverse_kinematics_old(
         self,
         ee_target_pos,
         ee_site="end_effector_site",
@@ -239,10 +304,11 @@ class PushCubeEnv(Env):
             # Update the robot position based on the action
             ee_id = self.model.site("end_effector_site").id
             ee_target_pos = self.data.site(ee_id).xpos + ee_action * 0.05  # limit maximum change in position
-            ee_target_pos[2] = np.max((0, ee_target_pos[2]))
+            ee_target_pos[2] = np.max((0, ee_target_pos[2])) # ROMAIN: questionable...
 
             # Use inverse kinematics to get the joint action wrt the end effector current position and displacement
             target_qpos = self.inverse_kinematics(ee_target_pos=ee_target_pos)
+            target_qpos = np.append(target_qpos, np.array([0]))
             # Block the gripper for push task
             target_qpos[-1:] = np.array([0])
         elif self.action_mode == "joint":
@@ -293,6 +359,7 @@ class PushCubeEnv(Env):
             observation["image_top"] = self.renderer.render()
         if self.observation_mode in ["state", "both"]:
             observation["cube_pos"] = self.data.qpos[self.num_dof : self.num_dof + 3].astype(np.float32).copy()
+            observation["cube_vel"] = self.data.qvel[self.num_dof + 3 : self.num_dof + 6].astype(np.float32).copy()
         return observation
 
     def reset(self, seed=None, options=None):
