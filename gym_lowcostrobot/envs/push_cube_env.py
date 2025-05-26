@@ -79,6 +79,7 @@ class PushCubeEnv(Env):
     def __init__(
         self,
         observation_mode="image",
+        robot_observation_mode="joint",  # or "ee"
         action_mode="joint",
         reward_type="sparse",
         block_gripper=True,
@@ -105,11 +106,19 @@ class PushCubeEnv(Env):
 
         # Set the observations space
         self.observation_mode = observation_mode
-        observation_subspaces = {
-            "arm_qpos": spaces.Box(low=-np.pi, high=np.pi, shape=(6,)),
-            "arm_qvel": spaces.Box(low=-10.0, high=10.0, shape=(6,)),
-            "target_pos": spaces.Box(low=-10.0, high=10.0, shape=(3,)),
-        }
+        self.robot_observation_mode = robot_observation_mode
+        if self.robot_observation_mode == "joint":
+            observation_subspaces = {
+                "arm_qpos": spaces.Box(low=-np.pi, high=np.pi, shape=(6,)),
+                "arm_qvel": spaces.Box(low=-10.0, high=10.0, shape=(6,)),
+                "target_pos": spaces.Box(low=-10.0, high=10.0, shape=(3,)),
+            }
+        if self.robot_observation_mode == "ee":
+            observation_subspaces = {
+                "xpos": spaces.Box(low=-1.0, high=1.0, shape=(3,)),
+                "xvel": spaces.Box(low=-1.0, high=1.0, shape=(3,)),
+                "target_pos": spaces.Box(low=-10.0, high=10.0, shape=(3,)),
+            }
         if self.observation_mode in ["image", "both"]:
             observation_subspaces["image_front"] = spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8)
             observation_subspaces["image_top"] = spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8)
@@ -154,9 +163,9 @@ class PushCubeEnv(Env):
         ee_site="end_effector_site",
         num_dof=5,
         # step=1,
-        lm_damping=0.005,
+        lm_damping=0.001,
         max_iter=20,
-        tolerance_err=0.005
+        tolerance_err=0.001
     ):
         """
         Computes the inverse kinematics for a robotic arm to reach the target end effector position.
@@ -337,21 +346,46 @@ class PushCubeEnv(Env):
 
         # Set the target position
         self.data.ctrl = target_qpos
+        
+        # F_0 = self.data.site(0).xpos.copy()
+        # th0 = self.data.qpos.copy()
+        # self.data.qpos[:6] = target_qpos
+        # mujoco.mj_fwdPosition(self.model, self.data)
+        # F_star = self.data.site(0).xpos.copy()
+        # # print("IK perf: F_star - (F_0 + dx)", 1000 * (F_star - F_0 - 0.05 * action))
+        
+        # self.data.qpos = th0
+        # mujoco.mj_fwdPosition(self.model, self.data)
 
         # Step the simulation forward
         for _ in range(self.control_decimation):
             mujoco.mj_step(self.model, self.data)
             if self.render_mode == "human":
                 self.viewer.sync()
+        
+        # print("ctrl - theta_f", self.data.ctrl - self.data.qpos[:6])
+        # print("act", 1000 * 0.05 * action)
+        # print("F_f - F_star", 1000 * (self.data.site(0).xpos - F_star))
+        # print("F_f - (F_0 + dx)", 1000 * (self.data.site(0).xpos - F_0 - 0.05 * action))
 
     def get_observation(self):
         # qpos is [x, y, z, qw, qx, qy, qz, q1, q2, q3, q4, q5, gripper]
         # qvel is [vx, vy, vz, wx, wy, wz, dq1, dq2, dq3, dq4, dq5, dgripper]
-        observation = {
-            "arm_qpos": self.data.qpos[: self.num_dof].astype(np.float32),
-            "arm_qvel": self.data.qvel[: self.num_dof].astype(np.float32),
-            "target_pos": self.target_pos,
-        }
+        if self.robot_observation_mode == "joint":
+            observation = {
+                "arm_qpos": self.data.qpos[: self.num_dof].astype(np.float32),
+                "arm_qvel": self.data.qvel[: self.num_dof].astype(np.float32),
+                "target_pos": self.target_pos,
+            }
+        if self.robot_observation_mode == "ee":
+            jacp, jacr = np.zeros((3, self.model.nv)), None
+            mujoco.mj_jacSite(self.model, self.data, jacp, jacr, 0)
+            ee_vel = jacp @ self.data.qvel
+            observation = {
+                "xpos": self.data.site_xpos[0].astype(np.float32),
+                "xvel": ee_vel.astype(np.float32),
+                "target_pos": self.target_pos,
+            }
         if self.observation_mode in ["image", "both"]:
             self.renderer.update_scene(self.data, camera="camera_front")
             observation["image_front"] = self.renderer.render()
