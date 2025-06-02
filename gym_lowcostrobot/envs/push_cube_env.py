@@ -88,6 +88,7 @@ class PushCubeEnv(Env):
         target_xy_range=0.3,
         n_substeps=20,
         render_mode=None,
+        cube_vel=False,
     ):
         # Load the MuJoCo model and data
         self.model = mujoco.MjModel.from_xml_path(os.path.join(ASSETS_PATH, "push_cube.xml"))
@@ -107,6 +108,7 @@ class PushCubeEnv(Env):
         # Set the observations space
         self.observation_mode = observation_mode
         self.robot_observation_mode = robot_observation_mode
+        self.cube_vel = cube_vel
         if self.robot_observation_mode == "joint":
             observation_subspaces = {
                 "arm_qpos": spaces.Box(low=-np.pi, high=np.pi, shape=(6,)),
@@ -125,7 +127,8 @@ class PushCubeEnv(Env):
             self.renderer = mujoco.Renderer(self.model)
         if self.observation_mode in ["state", "both"]:
             observation_subspaces["cube_pos"] = spaces.Box(low=-10.0, high=10.0, shape=(3,))
-            observation_subspaces["cube_vel"] = spaces.Box(low=-10.0, high=10.0, shape=(3,))
+            if self.cube_vel:
+                observation_subspaces["cube_vel"] = spaces.Box(low=-10.0, high=10.0, shape=(3,))
         self.observation_space = gym.spaces.Dict(observation_subspaces)
 
         self.control_decimation = n_substeps  # number of simulation steps per control step
@@ -393,6 +396,7 @@ class PushCubeEnv(Env):
             observation["image_top"] = self.renderer.render()
         if self.observation_mode in ["state", "both"]:
             observation["cube_pos"] = self.data.qpos[self.num_dof : self.num_dof + 3].astype(np.float32).copy()
+        if self.cube_vel:
             observation["cube_vel"] = self.data.qvel[self.num_dof + 3 : self.num_dof + 6].astype(np.float32).copy()
         return observation
 
