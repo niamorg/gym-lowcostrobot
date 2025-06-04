@@ -89,6 +89,7 @@ class PushCubeEnv(Env):
         n_substeps=20,
         render_mode=None,
         cube_vel=False,
+        help_ee_to_cube=False,
     ):
         # Load the MuJoCo model and data
         self.model = mujoco.MjModel.from_xml_path(os.path.join(ASSETS_PATH, "push_cube.xml"))
@@ -109,6 +110,7 @@ class PushCubeEnv(Env):
         self.observation_mode = observation_mode
         self.robot_observation_mode = robot_observation_mode
         self.cube_vel = cube_vel
+        self.help_ee_to_cube = help_ee_to_cube
         if self.robot_observation_mode == "joint":
             observation_subspaces = {
                 "arm_qpos": spaces.Box(low=-np.pi, high=np.pi, shape=(6,)),
@@ -188,7 +190,7 @@ class PushCubeEnv(Env):
         # View on the joint positions
         q = self.data.qpos[:num_dof]
 
-        ee_id = self.model.site(ee_site).id        
+        ee_id = self.model.site(ee_site).id
         jacp = np.zeros((3, self.model.nv))
         
         for iter in range(max_iter):
@@ -419,6 +421,8 @@ class PushCubeEnv(Env):
 
         # Step the simulation
         mujoco.mj_forward(self.model, self.data)
+        # for _ in range(int(1 / self.model.opt.timestep)):
+        #     mujoco.mj_step(self.model, self.data)
 
         return self.get_observation(), {}
 
@@ -452,6 +456,8 @@ class PushCubeEnv(Env):
         d = self.goal_distance(achieved_goal, desired_goal)
         if self.reward_type == "sparse":
             return -(d > self.distance_threshold).astype(np.float32)
+        elif self.help_ee_to_cube:
+            return -d - np.linalg.norm(self.data.site(0).xpos - achieved_goal, axis=-1)
         else:
             return -d
 
