@@ -317,7 +317,7 @@ class ReachCubeEnv(Env):
 
         info = {"is_success": self.is_success(ee_pos, cube_pos)}
 
-        terminated = info["is_success"]
+        terminated = False #info["is_success"]
         truncated = False
         reward = self.compute_reward(ee_pos, cube_pos)
         return observation, reward, terminated, truncated, info
