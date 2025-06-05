@@ -130,9 +130,10 @@ class ReachCubeEnv(Env):
 
         # Set additional utils
         self.cube_xy_range = cube_xy_range
+        self.cube_side = self.model.geom_size[self.model.body("cube").geomadr[0]][2]
 
-        self.cube_low = np.array([-self.cube_xy_range / 2, -self.cube_xy_range / 2, 0])
-        self.cube_high = np.array([self.cube_xy_range / 2, self.cube_xy_range / 2, 0])
+        self.cube_low = np.array([-self.cube_xy_range / 2, -self.cube_xy_range / 2, self.cube_side/2])
+        self.cube_high = np.array([self.cube_xy_range / 2, self.cube_xy_range / 2, self.cube_side/2 + 0.01])
 
         # Shift in y-axis to sample from positive coordinates in the y-axis
         self.cube_low[1] += 0.165
@@ -297,6 +298,10 @@ class ReachCubeEnv(Env):
 
         # Step the simulation
         mujoco.mj_forward(self.model, self.data)
+
+        # Poping the cube off the floor
+        for _ in range(10):
+            mujoco.mj_step(self.model, self.data)
 
         return self.get_observation(), {}
 
