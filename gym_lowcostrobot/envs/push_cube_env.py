@@ -79,7 +79,6 @@ class PushCubeEnv(Env):
     def __init__(
         self,
         observation_mode="image",
-        robot_observation_mode="joint",  # or "ee"
         action_mode="joint",
         reward_type="sparse",
         block_gripper=True,
@@ -88,8 +87,7 @@ class PushCubeEnv(Env):
         target_xy_range=0.3,
         n_substeps=20,
         render_mode=None,
-        cube_vel=False,
-        help_ee_to_cube=False,
+        simulation_timestep=0.002,
     ):
         # Load the MuJoCo model and data
         self.model = mujoco.MjModel.from_xml_path(os.path.join(ASSETS_PATH, "push_cube.xml"))
@@ -108,32 +106,24 @@ class PushCubeEnv(Env):
 
         # Set the observations space
         self.observation_mode = observation_mode
-        self.robot_observation_mode = robot_observation_mode
-        self.cube_vel = cube_vel
-        self.help_ee_to_cube = help_ee_to_cube
-        if self.robot_observation_mode == "joint":
-            observation_subspaces = {
-                "arm_qpos": spaces.Box(low=-np.pi, high=np.pi, shape=(6,)),
-                "arm_qvel": spaces.Box(low=-10.0, high=10.0, shape=(6,)),
-                "target_pos": spaces.Box(low=-10.0, high=10.0, shape=(3,)),
-            }
-        if self.robot_observation_mode == "ee":
-            observation_subspaces = {
-                "xpos": spaces.Box(low=-1.0, high=1.0, shape=(3,)),
-                "xvel": spaces.Box(low=-1.0, high=1.0, shape=(3,)),
-                "target_pos": spaces.Box(low=-10.0, high=10.0, shape=(3,)),
-            }
+        observation_subspaces = {
+            "arm_qpos": spaces.Box(low=-np.pi, high=np.pi, shape=(6,)),
+            "arm_qvel": spaces.Box(low=-10.0, high=10.0, shape=(6,)),
+            "target_pos": spaces.Box(low=-10.0, high=10.0, shape=(3,)),
+            "xpos": spaces.Box(low=-1.0, high=1.0, shape=(3,)),
+            "xvel": spaces.Box(low=-1.0, high=1.0, shape=(3,)),
+        }
         if self.observation_mode in ["image", "both"]:
             observation_subspaces["image_front"] = spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8)
             observation_subspaces["image_top"] = spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8)
             self.renderer = mujoco.Renderer(self.model)
         if self.observation_mode in ["state", "both"]:
             observation_subspaces["cube_pos"] = spaces.Box(low=-10.0, high=10.0, shape=(3,))
-            if self.cube_vel:
-                observation_subspaces["cube_vel"] = spaces.Box(low=-10.0, high=10.0, shape=(3,))
+            observation_subspaces["cube_vel"] = spaces.Box(low=-10.0, high=10.0, shape=(3,))
         self.observation_space = gym.spaces.Dict(observation_subspaces)
 
         self.control_decimation = n_substeps  # number of simulation steps per control step
+        self.model.opt.timestep = simulation_timestep
 
         # Set the render utilities
         assert render_mode is None or render_mode in self.metadata["render_modes"]
@@ -161,6 +151,8 @@ class PushCubeEnv(Env):
         self.cube_high[1] += 0.10
         self.target_low[1] += 0.165
         self.target_high[1] += 0.10
+
+        self.success_count = 0
 
     def inverse_kinematics(
         self,
@@ -226,78 +218,6 @@ class PushCubeEnv(Env):
 
         return q_target_pos #, error_norm, (error_norm < tolerance_err), ee_pos, iter
 
-    def inverse_kinematics_old(
-        self,
-        ee_target_pos,
-        ee_site="end_effector_site",
-        num_dof=6,
-        step=0.5,
-        lm_damping=0.15,
-        max_iter=10,
-        tolerance_err=0.01,
-        home_position=None,
-        nullspace_weight=0.0,
-    ):
-        """
-        Computes the inverse kinematics for a robotic arm to reach the target end effector position.
-
-        :param ee_target_pos: numpy array of target end effector position [x, y, z]
-        :param ee_site: str, name of the end effector site
-        :param num_dof: int, number of degrees of freedom
-        :param step: float, step size for the iteration
-        :param lm_damping: float, regularization factor for the pseudoinverse computation
-        :param max_iter: int, maximum number of iterations
-        :param tolerance_err: float, tolerance error
-        :param home_position: numpy array of home joint positions to regularize towards
-        :param nullspace_weight: float, weight for the nullspace regularization
-        :return: numpy array of target joint positions
-        """
-
-        if home_position is None:
-            home_position = np.zeros(num_dof)  # Default to zero if no home position is provided
-
-        jacp = np.zeros((3, self.model.nv))
-        ee_id = self.model.site(ee_site).id
-
-        # Initial joint positions
-        q = self.data.qpos[:num_dof].copy()
-
-        for _ in range(max_iter):
-            ee_pos = self.data.site(ee_id).xpos
-            error = ee_target_pos - ee_pos
-            error_norm = np.linalg.norm(error)
-
-            # Stop iterations
-            if error_norm < tolerance_err:
-                break
-
-            # Jacobian
-            mujoco.mj_jacSite(self.model, self.data, jacp, None, ee_id)
-
-            # Damped least squares (Levenberg-Marquardt Algorithm)
-            jac_reg = jacp[:, :num_dof].T @ jacp[:, :num_dof] + lm_damping * np.eye(num_dof)
-            jac_pinv = np.linalg.inv(jac_reg) @ jacp[:, :num_dof].T
-            qdot = jac_pinv @ error
-
-            # Nullspace control biasing joint velocities towards the home configuration
-            qdot += (np.eye(num_dof) - np.linalg.pinv(jacp[:, :num_dof]) @ jacp[:, :num_dof]) @ (
-                nullspace_weight * (home_position - self.data.qpos[:num_dof])
-            )
-
-            # Normalize joint velocity
-            qdot_norm = np.linalg.norm(qdot)
-            if qdot_norm > 1.0:
-                qdot /= qdot_norm
-
-            # Compute the new joint positions. Integrate joint velocities to obtain joint positions.
-            q += qdot * step
-
-            # Check limits
-            np.clip(q, *self.model.jnt_range[:num_dof].T, out=q)
-
-        q_target_pos = q
-        return q_target_pos
-
     def apply_action(self, action):
         """
         Step the simulation forward based on the action
@@ -318,7 +238,7 @@ class PushCubeEnv(Env):
             # Update the robot position based on the action
             ee_id = self.model.site("end_effector_site").id
             ee_target_pos = self.data.site(ee_id).xpos + ee_action * 0.05  # limit maximum change in position
-            ee_target_pos[2] = np.max((0, ee_target_pos[2])) # ROMAIN: questionable...
+            ee_target_pos[2] = np.max((0, ee_target_pos[2])) # TODO: ROMAIN: questionable...
 
             # Use inverse kinematics to get the joint action wrt the end effector current position and displacement
             target_qpos = self.inverse_kinematics(ee_target_pos=ee_target_pos)
@@ -351,46 +271,28 @@ class PushCubeEnv(Env):
 
         # Set the target position
         self.data.ctrl = target_qpos
-        
-        # F_0 = self.data.site(0).xpos.copy()
-        # th0 = self.data.qpos.copy()
-        # self.data.qpos[:6] = target_qpos
-        # mujoco.mj_fwdPosition(self.model, self.data)
-        # F_star = self.data.site(0).xpos.copy()
-        # # print("IK perf: F_star - (F_0 + dx)", 1000 * (F_star - F_0 - 0.05 * action))
-        
-        # self.data.qpos = th0
-        # mujoco.mj_fwdPosition(self.model, self.data)
 
         # Step the simulation forward
         for _ in range(self.control_decimation):
             mujoco.mj_step(self.model, self.data)
             if self.render_mode == "human":
                 self.viewer.sync()
-        
-        # print("ctrl - theta_f", self.data.ctrl - self.data.qpos[:6])
-        # print("act", 1000 * 0.05 * action)
-        # print("F_f - F_star", 1000 * (self.data.site(0).xpos - F_star))
-        # print("F_f - (F_0 + dx)", 1000 * (self.data.site(0).xpos - F_0 - 0.05 * action))
 
     def get_observation(self):
         # qpos is [x, y, z, qw, qx, qy, qz, q1, q2, q3, q4, q5, gripper]
         # qvel is [vx, vy, vz, wx, wy, wz, dq1, dq2, dq3, dq4, dq5, dgripper]
-        if self.robot_observation_mode == "joint":
-            observation = {
-                "arm_qpos": self.data.qpos[: self.num_dof].astype(np.float32),
-                "arm_qvel": self.data.qvel[: self.num_dof].astype(np.float32),
-                "target_pos": self.target_pos,
-            }
-        if self.robot_observation_mode == "ee":
-            jacp, jacr = np.zeros((3, self.model.nv)), None
-            mujoco.mj_jacSite(self.model, self.data, jacp, jacr, 0)
-            ee_vel = jacp @ self.data.qvel
-            observation = {
-                "xpos": self.data.site_xpos[0].astype(np.float32),
-                "xvel": ee_vel.astype(np.float32),
-                "target_pos": self.target_pos,
-            }
+
+        jacp, jacr = np.zeros((3, self.model.nv)), None
+        mujoco.mj_jacSite(self.model, self.data, jacp, jacr, 0)
+        ee_vel = jacp @ self.data.qvel
+
+        observation = {
+            "arm_qpos": self.data.qpos[: self.num_dof].astype(np.float32),
+            "arm_qvel": self.data.qvel[: self.num_dof].astype(np.float32),
+            "target_pos": self.target_pos,
+            "xpos": self.data.site_xpos[0].astype(np.float32),
+            "xvel": ee_vel.astype(np.float32),
+        }
         if self.observation_mode in ["image", "both"]:
             self.renderer.update_scene(self.data, camera="camera_front")
             observation["image_front"] = self.renderer.render()
@@ -398,7 +300,6 @@ class PushCubeEnv(Env):
             observation["image_top"] = self.renderer.render()
         if self.observation_mode in ["state", "both"]:
             observation["cube_pos"] = self.data.qpos[self.num_dof : self.num_dof + 3].astype(np.float32).copy()
-        if self.cube_vel:
             observation["cube_vel"] = self.data.qvel[self.num_dof + 3 : self.num_dof + 6].astype(np.float32).copy()
         return observation
 
@@ -421,8 +322,10 @@ class PushCubeEnv(Env):
 
         # Step the simulation
         mujoco.mj_forward(self.model, self.data)
-        # for _ in range(int(1 / self.model.opt.timestep)):
-        #     mujoco.mj_step(self.model, self.data)
+
+        # Pop the cube off the floor
+        for _ in range(int(0.2 / self.model.opt.timestep)):
+            mujoco.mj_step(self.model, self.data)
 
         return self.get_observation(), {}
 
@@ -435,13 +338,16 @@ class PushCubeEnv(Env):
 
         # Get the position of the cube
         cube_id = self.model.body("cube").id
-        cube_pos = self.data.body(cube_id).xpos.copy()
+        cube_pos = self.data.body(cube_id).xpos.copy().astype(np.float32)
 
-        info = {"is_success": self.is_success(cube_pos, observation["target_pos"])}
+        reward, info = self.compute_reward(cube_pos, observation["target_pos"])
 
-        terminated = info["is_success"]
+        info["is_success"] = is_success = self.is_success(cube_pos, observation["target_pos"])
+        self.success_count = (self.success_count + 1) if is_success else 0
+
+        terminated = self.success_count >= 5 # TODO: ROMAIN: hardcoded
         truncated = False
-        reward = self.compute_reward(cube_pos, observation["target_pos"])
+
         return observation, reward, terminated, truncated, info
 
     def goal_distance(self, goal_a, goal_b):
@@ -453,13 +359,20 @@ class PushCubeEnv(Env):
         return d < self.distance_threshold
 
     def compute_reward(self, achieved_goal, desired_goal, info=None):
-        d = self.goal_distance(achieved_goal, desired_goal)
         if self.reward_type == "sparse":
-            return -(d > self.distance_threshold).astype(np.float32)
-        elif self.help_ee_to_cube:
-            return -d - np.linalg.norm(self.data.site(0).xpos - achieved_goal, axis=-1)
+            d = self.goal_distance(achieved_goal, desired_goal)
+            return -(d > self.distance_threshold).astype(np.float32), {}
         else:
-            return -d
+            ee_to_cube = np.linalg.norm(self.data.site(0).xpos - achieved_goal)
+            reaching_reward = 1 - np.maximum(0, (ee_to_cube - 0.03) / 0.7)
+            
+            pushing_reward = 0
+            if reached := (reaching_reward == 1):
+                cube_to_target = np.linalg.norm(achieved_goal - desired_goal)
+                pushing_reward = 1 - np.maximum(0, cube_to_target - self.distance_threshold)
+
+            reward = reaching_reward + pushing_reward
+            return reward, {"reached": reached, "reaching_reward": reaching_reward, "pushing_reward": pushing_reward}
 
     def render(self):
         if self.render_mode == "human":
@@ -475,3 +388,75 @@ class PushCubeEnv(Env):
             self.renderer.close()
         if self.render_mode == "rgb_array":
             self.rgb_array_renderer.close()
+
+#  def inverse_kinematics_old(
+#         self,
+#         ee_target_pos,
+#         ee_site="end_effector_site",
+#         num_dof=6,
+#         step=0.5,
+#         lm_damping=0.15,
+#         max_iter=10,
+#         tolerance_err=0.01,
+#         home_position=None,
+#         nullspace_weight=0.0,
+#     ):
+#         """
+#         Computes the inverse kinematics for a robotic arm to reach the target end effector position.
+
+#         :param ee_target_pos: numpy array of target end effector position [x, y, z]
+#         :param ee_site: str, name of the end effector site
+#         :param num_dof: int, number of degrees of freedom
+#         :param step: float, step size for the iteration
+#         :param lm_damping: float, regularization factor for the pseudoinverse computation
+#         :param max_iter: int, maximum number of iterations
+#         :param tolerance_err: float, tolerance error
+#         :param home_position: numpy array of home joint positions to regularize towards
+#         :param nullspace_weight: float, weight for the nullspace regularization
+#         :return: numpy array of target joint positions
+#         """
+
+#         if home_position is None:
+#             home_position = np.zeros(num_dof)  # Default to zero if no home position is provided
+
+#         jacp = np.zeros((3, self.model.nv))
+#         ee_id = self.model.site(ee_site).id
+
+#         # Initial joint positions
+#         q = self.data.qpos[:num_dof].copy()
+
+#         for _ in range(max_iter):
+#             ee_pos = self.data.site(ee_id).xpos
+#             error = ee_target_pos - ee_pos
+#             error_norm = np.linalg.norm(error)
+
+#             # Stop iterations
+#             if error_norm < tolerance_err:
+#                 break
+
+#             # Jacobian
+#             mujoco.mj_jacSite(self.model, self.data, jacp, None, ee_id)
+
+#             # Damped least squares (Levenberg-Marquardt Algorithm)
+#             jac_reg = jacp[:, :num_dof].T @ jacp[:, :num_dof] + lm_damping * np.eye(num_dof)
+#             jac_pinv = np.linalg.inv(jac_reg) @ jacp[:, :num_dof].T
+#             qdot = jac_pinv @ error
+
+#             # Nullspace control biasing joint velocities towards the home configuration
+#             qdot += (np.eye(num_dof) - np.linalg.pinv(jacp[:, :num_dof]) @ jacp[:, :num_dof]) @ (
+#                 nullspace_weight * (home_position - self.data.qpos[:num_dof])
+#             )
+
+#             # Normalize joint velocity
+#             qdot_norm = np.linalg.norm(qdot)
+#             if qdot_norm > 1.0:
+#                 qdot /= qdot_norm
+
+#             # Compute the new joint positions. Integrate joint velocities to obtain joint positions.
+#             q += qdot * step
+
+#             # Check limits
+#             np.clip(q, *self.model.jnt_range[:num_dof].T, out=q)
+
+#         q_target_pos = q
+#         return q_target_pos
