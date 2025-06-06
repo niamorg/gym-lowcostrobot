@@ -110,8 +110,8 @@ class PushCubeEnv(Env):
             "arm_qpos": spaces.Box(low=-np.pi, high=np.pi, shape=(6,)),
             "arm_qvel": spaces.Box(low=-10.0, high=10.0, shape=(6,)),
             "target_pos": spaces.Box(low=-10.0, high=10.0, shape=(3,)),
-            "xpos": spaces.Box(low=-1.0, high=1.0, shape=(3,)),
-            "xvel": spaces.Box(low=-1.0, high=1.0, shape=(3,)),
+            "ee_xpos": spaces.Box(low=-1.0, high=1.0, shape=(3,)),
+            "ee_xvel": spaces.Box(low=-1.0, high=1.0, shape=(3,)),
         }
         if self.observation_mode in ["image", "both"]:
             observation_subspaces["image_front"] = spaces.Box(0, 255, shape=(240, 320, 3), dtype=np.uint8)
@@ -290,8 +290,8 @@ class PushCubeEnv(Env):
             "arm_qpos": self.data.qpos[: self.num_dof].astype(np.float32),
             "arm_qvel": self.data.qvel[: self.num_dof].astype(np.float32),
             "target_pos": self.target_pos,
-            "xpos": self.data.site_xpos[0].astype(np.float32),
-            "xvel": ee_vel.astype(np.float32),
+            "ee_xpos": self.data.site_xpos[0].astype(np.float32),
+            "ee_xvel": ee_vel.astype(np.float32),
         }
         if self.observation_mode in ["image", "both"]:
             self.renderer.update_scene(self.data, camera="camera_front")
