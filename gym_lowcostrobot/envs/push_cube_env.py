@@ -306,16 +306,21 @@ class PushCubeEnv(Env):
     def reset(self, seed=None, options=None):
         # We need the following line to seed self.np_random
         super().reset(seed=seed, options=options)
+        self.success_count = 0
+        
+        while True:
+            # Reset the robot to the initial position and sample the cube position
+            cube_pos = self.np_random.uniform(self.cube_low, self.cube_high)
+            cube_rot = np.array([1.0, 0.0, 0.0, 0.0])
+            robot_qpos = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            self.data.qpos[: self.num_dof] = robot_qpos
+            self.data.qpos[self.num_dof : self.num_dof + 7] = np.concatenate([cube_pos, cube_rot])
 
-        # Reset the robot to the initial position and sample the cube position
-        cube_pos = self.np_random.uniform(self.cube_low, self.cube_high)
-        cube_rot = np.array([1.0, 0.0, 0.0, 0.0])
-        robot_qpos = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        self.data.qpos[: self.num_dof] = robot_qpos
-        self.data.qpos[self.num_dof : self.num_dof + 7] = np.concatenate([cube_pos, cube_rot])
-
-        # Sample the target position
-        self.target_pos = self.np_random.uniform(self.target_low, self.target_high).astype(np.float32)
+            # Sample the target position
+            self.target_pos = self.np_random.uniform(self.target_low, self.target_high).astype(np.float32)
+            
+            if np.linalg.norm(cube_pos - self.target_pos) > 1.3 * self.distance_threshold:
+                break
 
         # Update visualization
         self.model.geom("target_region").pos = self.target_pos[:]
@@ -342,11 +347,12 @@ class PushCubeEnv(Env):
 
         reward, info = self.compute_reward(cube_pos, observation["target_pos"])
 
-        info["is_success"] = is_success = self.is_success(cube_pos, observation["target_pos"])
-        self.success_count = (self.success_count + 1) if is_success else 0
+        self.success_count = (self.success_count + 1) * self.is_success(cube_pos, observation["target_pos"])
 
         terminated = self.success_count >= 5 # TODO: ROMAIN: hardcoded
         truncated = False
+
+        info["is_success"] = terminated
 
         return observation, reward, terminated, truncated, info
 
@@ -369,7 +375,7 @@ class PushCubeEnv(Env):
             pushing_reward = 0
             if reached := (reaching_reward == 1):
                 cube_to_target = np.linalg.norm(achieved_goal - desired_goal)
-                pushing_reward = 1 - np.maximum(0, cube_to_target - self.distance_threshold)
+                pushing_reward = 1 - np.maximum(0, (cube_to_target - self.distance_threshold)/ 0.4)
 
             reward = reaching_reward + pushing_reward
             return reward, {"reached": reached, "reaching_reward": reaching_reward, "pushing_reward": pushing_reward}
