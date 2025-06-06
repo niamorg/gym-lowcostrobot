@@ -1,7 +1,7 @@
 import gymnasium as gym
 import torch
-from gymnasium.wrappers.filter_observation import FilterObservation
-from gymnasium.wrappers.flatten_observation import FlattenObservation
+from gymnasium.wrappers import FilterObservation
+from gymnasium.wrappers import FlattenObservation
 from stable_baselines3 import PPO, TD3
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.evaluation import evaluate_policy
@@ -24,9 +24,15 @@ def do_td3_push():
 
 
 def make_env():
-    env = gym.make("PushCube-v0", observation_mode="state", render_mode=None)
-    env = FilterObservation(env, ["arm_qpos", "cube_pos", "target_pos"])
+    if not hasattr(make_env, "counter"):
+        make_env.counter = 0
+    make_env.counter += 1
+    print(f"make_env.counter: {make_env.counter}")
+    env = gym.make("ReachCube-v0", observation_mode="state", render_mode="rgb_array")
+    env = FilterObservation(env, ["arm_qpos", "cube_pos"])
     env = FlattenObservation(env)
+    if make_env.counter == 1:
+        env = gym.wrappers.RecordVideo(env, video_folder="videos", name_prefix="ppo_reach_cube", fps=25)
     return env
 
 
@@ -39,11 +45,11 @@ def do_ppo_push(device="cpu", render=True):
     model.learn(total_timesteps=int(1e5), tb_log_name="ppo_push_cube", progress_bar=True)
 
     # Evaluate the agent
-    env_test = gym.make("PushCube-v0", observation_mode="state", render_mode=None)
-    env_test = FilterObservation(env_test, ["arm_qpos", "cube_pos", "target_pos"])
-    env_test = FlattenObservation(env_test)
-    mean_reward, std_reward = evaluate_policy(model, env_test, n_eval_episodes=10, render=render)
-    print(f"Mean reward: {mean_reward} +/- {std_reward}")
+    # env_test = gym.make("PushCube-v0", observation_mode="state", render_mode=None)
+    # env_test = FilterObservation(env_test, ["arm_qpos", "cube_pos", "target_pos"])
+    # env_test = FlattenObservation(env_test)
+    # mean_reward, std_reward = evaluate_policy(model, env_test, n_eval_episodes=10, render=render)
+    # print(f"Mean reward: {mean_reward} +/- {std_reward}")
 
 
 if __name__ == "__main__":
