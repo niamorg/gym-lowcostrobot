@@ -124,6 +124,7 @@ class PushCubeEnv(Env):
 
         self.control_decimation = n_substeps  # number of simulation steps per control step
         self.model.opt.timestep = simulation_timestep
+        self.metadata["render_fps"] = round(1 / (simulation_timestep * n_substeps))
 
         # Set the render utilities
         assert render_mode is None or render_mode in self.metadata["render_modes"]
@@ -151,6 +152,12 @@ class PushCubeEnv(Env):
         self.cube_high[1] += 0.10
         self.target_low[1] += 0.165
         self.target_high[1] += 0.10
+
+        self.work_zone_low = self.cube_low
+        self.work_zone_high = self.cube_high
+
+        self.cube_high[1] -= 0.05
+        self.target_high[1] -= 0.05
 
         self.success_count = 0
 
@@ -345,14 +352,15 @@ class PushCubeEnv(Env):
         cube_id = self.model.body("cube").id
         cube_pos = self.data.body(cube_id).xpos.copy().astype(np.float32)
 
+        out_of_work_zone = (cube_pos[0] < self.work_zone_low[0]) or (cube_pos[0] > self.work_zone_high[0]) or (cube_pos[1] > self.work_zone_high[1])
+
         reward, info = self.compute_reward(cube_pos, observation["target_pos"])
 
         self.success_count = (self.success_count + 1) * self.is_success(cube_pos, observation["target_pos"])
+        info["is_success"] = self.success_count >= 5  # TODO: ROMAIN: hardcoded
 
-        terminated = self.success_count >= 5 # TODO: ROMAIN: hardcoded
+        terminated = info["is_success"] or out_of_work_zone
         truncated = False
-
-        info["is_success"] = terminated
 
         return observation, reward, terminated, truncated, info
 
@@ -370,14 +378,16 @@ class PushCubeEnv(Env):
             return -(d > self.distance_threshold).astype(np.float32), {}
         else:
             ee_to_cube = np.linalg.norm(self.data.site(0).xpos - achieved_goal)
-            reaching_reward = 1 - np.maximum(0, (ee_to_cube - 0.03) / 0.7)
+            reaching_reward = 1 - np.maximum(0, (ee_to_cube - 0.04) / 0.5)
             
             pushing_reward = 0
             if reached := (reaching_reward == 1):
                 cube_to_target = np.linalg.norm(achieved_goal - desired_goal)
                 pushing_reward = 1 - np.maximum(0, (cube_to_target - self.distance_threshold)/ 0.4)
 
-            reward = reaching_reward + pushing_reward
+            reward = reaching_reward + 20 * pushing_reward
+            if reached and (cube_to_target < self.distance_threshold):
+                reward = 40
             return reward, {"reached": reached, "reaching_reward": reaching_reward, "pushing_reward": pushing_reward}
 
     def render(self):
