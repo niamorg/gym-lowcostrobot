@@ -352,11 +352,11 @@ class PushCubeEnv(Env):
         cube_id = self.model.body("cube").id
         cube_pos = self.data.body(cube_id).xpos.copy().astype(np.float32)
 
-        out_of_work_zone = (cube_pos[0] < self.work_zone_low[0]) or (cube_pos[0] > self.work_zone_high[0]) or (cube_pos[1] > self.work_zone_high[1])
+        out_of_work_zone = cube_pos[1] > self.work_zone_high[1]
 
         reward, info = self.compute_reward(cube_pos, observation["target_pos"])
 
-        self.success_count = (self.success_count + 1) * self.is_success(cube_pos, observation["target_pos"])
+        self.success_count = (self.success_count + 1) if self.is_success(cube_pos, observation["target_pos"]) else 0
         info["is_success"] = self.success_count >= 5  # TODO: ROMAIN: hardcoded
 
         terminated = info["is_success"] or out_of_work_zone
@@ -377,18 +377,24 @@ class PushCubeEnv(Env):
             d = self.goal_distance(achieved_goal, desired_goal)
             return -(d > self.distance_threshold).astype(np.float32), {}
         else:
-            ee_to_cube = np.linalg.norm(self.data.site(0).xpos - achieved_goal)
-            reaching_reward = 1 - np.maximum(0, (ee_to_cube - 0.04) / 0.5)
+            reward = 0
             
-            pushing_reward = 0
-            if reached := (reaching_reward == 1):
-                cube_to_target = np.linalg.norm(achieved_goal - desired_goal)
-                pushing_reward = 1 - np.maximum(0, (cube_to_target - self.distance_threshold)/ 0.4)
+            ee_to_cube = np.linalg.norm(self.data.site(0).xpos - achieved_goal)
+            reaching_reward = 1 - np.maximum(0, (ee_to_cube - 0.02) / 0.4)
+            reward += reaching_reward            
 
-            reward = reaching_reward + 20 * pushing_reward
-            if reached and (cube_to_target < self.distance_threshold):
+            reached = (reaching_reward == 1)
+
+            cube_to_target = np.linalg.norm(achieved_goal - desired_goal)
+            pushing_reward = 1 - np.maximum(0, (cube_to_target - self.distance_threshold)/ 0.4)
+
+            if reached:
+                reward += 20 * pushing_reward
+
+            if on_target := (cube_to_target < self.distance_threshold):
                 reward = 40
-            return reward, {"reached": reached, "reaching_reward": reaching_reward, "pushing_reward": pushing_reward}
+
+            return reward, {"on_target": on_target, "reached": reached, "reaching_reward": reaching_reward, "pushing_reward": pushing_reward}
 
     def render(self):
         if self.render_mode == "human":
