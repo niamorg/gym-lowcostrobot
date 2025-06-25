@@ -156,10 +156,10 @@ class PushCubeEnv(Env):
         self.work_zone_low = self.cube_low
         self.work_zone_high = self.cube_high
 
-        self.cube_high[1] -= 0.05
+        self.cube_high[1] -= 0.02
         self.target_high[1] -= 0.05
 
-        self.success_count = 0
+        # self.success_count = 0
 
     def inverse_kinematics(
         self,
@@ -356,8 +356,8 @@ class PushCubeEnv(Env):
 
         reward, info = self.compute_reward(cube_pos, observation["target_pos"])
 
-        self.success_count = (self.success_count + 1) if self.is_success(cube_pos, observation["target_pos"]) else 0
-        info["is_success"] = self.success_count >= 5  # TODO: ROMAIN: hardcoded
+        # self.success_count = (self.success_count + 1) if self.is_success(cube_pos, observation["target_pos"]) else 0
+        info["is_success"] = info["on_target"] # self.success_count >= 5  # TODO: ROMAIN: hardcoded
 
         terminated = info["is_success"] or out_of_work_zone
         truncated = False
@@ -377,22 +377,18 @@ class PushCubeEnv(Env):
             d = self.goal_distance(achieved_goal, desired_goal)
             return -(d > self.distance_threshold).astype(np.float32), {}
         else:
-            reward = 0
-            
             ee_to_cube = np.linalg.norm(self.data.site(0).xpos - achieved_goal)
             reaching_reward = 1 - np.maximum(0, (ee_to_cube - 0.02) / 0.4)
-            reward += reaching_reward            
 
             reached = (reaching_reward == 1)
 
             cube_to_target = np.linalg.norm(achieved_goal - desired_goal)
             pushing_reward = 1 - np.maximum(0, (cube_to_target - self.distance_threshold)/ 0.4)
 
-            if reached:
-                reward += 20 * pushing_reward
-
+            reward = reaching_reward + reached * 20 * pushing_reward
+            
             if on_target := (cube_to_target < self.distance_threshold):
-                reward = 40
+                reward = 400
 
             return reward, {"on_target": on_target, "reached": reached, "reaching_reward": reaching_reward, "pushing_reward": pushing_reward}
 
