@@ -4,5 +4,7 @@ from .push_cube_env import PushCubeEnv
 from .reach_cube_env import ReachCubeEnv
 from .stack_two_cubes_env import StackTwoCubesEnv
 from .push_cube_loop_env import PushCubeLoopEnv
+from .my_push_cube_env import MyPushCubeEnv
+from .my_reach_cube_env import MyReachCubeEnv
 
-__all__ = ["LiftCubeEnv", "PickPlaceCubeEnv", "PushCubeEnv", "ReachCubeEnv", "StackTwoCubesEnv", "PushCubeLoopEnv"]
+__all__ = ["LiftCubeEnv", "PickPlaceCubeEnv", "PushCubeEnv", "ReachCubeEnv", "StackTwoCubesEnv", "PushCubeLoopEnv", "MyPushCubeEnv"]

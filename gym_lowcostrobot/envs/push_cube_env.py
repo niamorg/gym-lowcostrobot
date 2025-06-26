@@ -284,6 +284,7 @@ class PushCubeEnv(Env):
             mujoco.mj_step(self.model, self.data)
             if self.render_mode == "human":
                 self.viewer.sync()
+        mujoco.mj_forward(self.model, self.data)
 
     def get_observation(self):
         # qpos is [x, y, z, qw, qx, qy, qz, q1, q2, q3, q4, q5, gripper]
@@ -313,7 +314,7 @@ class PushCubeEnv(Env):
     def reset(self, seed=None, options=None):
         # We need the following line to seed self.np_random
         super().reset(seed=seed, options=options)
-        self.success_count = 0
+        # self.success_count = 0
         
         while True:
             # Reset the robot to the initial position and sample the cube position
