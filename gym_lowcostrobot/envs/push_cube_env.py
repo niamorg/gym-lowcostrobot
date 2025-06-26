@@ -88,6 +88,7 @@ class PushCubeEnv(Env):
         n_substeps=20,
         render_mode=None,
         simulation_timestep=0.002,
+        reward_divisor=1.0,
     ):
         # Load the MuJoCo model and data
         self.model = mujoco.MjModel.from_xml_path(os.path.join(ASSETS_PATH, "push_cube.xml"))
@@ -158,6 +159,8 @@ class PushCubeEnv(Env):
 
         self.cube_high[1] -= 0.02
         self.target_high[1] -= 0.05
+
+        self.reward_divisor = reward_divisor
 
         # self.success_count = 0
 
@@ -391,7 +394,7 @@ class PushCubeEnv(Env):
             if on_target := (cube_to_target < self.distance_threshold):
                 reward = 400
 
-            return reward, {"on_target": on_target, "reached": reached, "reaching_reward": reaching_reward, "pushing_reward": pushing_reward}
+            return reward / self.reward_divisor, {"on_target": on_target, "reached": reached, "reaching_reward": reaching_reward, "pushing_reward": pushing_reward}
 
     def render(self):
         if self.render_mode == "human":
