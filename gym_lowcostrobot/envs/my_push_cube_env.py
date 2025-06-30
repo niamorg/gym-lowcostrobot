@@ -12,10 +12,11 @@ class MyPushCubeEnv(BaseEnv):
     WORK_ZONE_MIN = np.array([-0.30, -0.20])
     WORK_ZONE_MAX = np.array([0.30, 0.23])
 
-    def __init__(self, distance_threshold=0.05, **kwargs):
+    def __init__(self, distance_threshold=0.05, episodic=True, **kwargs):
         super().__init__(model_path="push_cube.xml", **kwargs)
         self.initial_joint_pos = np.zeros_like(self.joint_pos)
         self.distance_threshold = distance_threshold
+        self.episodic = episodic
         
         # Complete the observation space.
         self.observation_space.spaces['cube_pos'] = Box(low=-np.inf, high=np.inf, shape=(3,))
@@ -70,7 +71,9 @@ class MyPushCubeEnv(BaseEnv):
 
         in_work_zone = np.all(self.WORK_ZONE_MIN < self.cube_pos[:2]) and np.all(self.cube_pos[:2] < self.WORK_ZONE_MAX)
 
-        return self.get_observation(), reward, (info["is_success"] or not in_work_zone), False, info
+        terminated = (info["is_success"] or not in_work_zone) if self.episodic else False
+
+        return self.get_observation(), reward, terminated, False, info
 
 
     def compute_reward(self):
@@ -85,6 +88,6 @@ class MyPushCubeEnv(BaseEnv):
         reward = reaching_reward + reached * 20 * pushing_reward
         
         if on_target := (cube_to_target < self.distance_threshold):
-            reward = 400
+            reward = 400 if self.episodic else 40
 
         return reward, {"on_target": on_target, "reached": reached, "reaching_reward": reaching_reward, "pushing_reward": pushing_reward}
