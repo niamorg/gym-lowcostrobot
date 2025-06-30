@@ -50,14 +50,14 @@ class MyPushCubeEnv(BaseEnv):
             self.target_pos = self.np_random.uniform(self.TARGET_SPAWN_ZONE_MIN, self.TARGET_SPAWN_ZONE_MAX)
             if np.linalg.norm(self.cube_pos - self.target_pos) > 2 * self.distance_threshold:
                 break
-
+        
+        # Update visualization.
+        self.model.geom("target_region").pos = self.target_pos[:]
+        
         # Set derived quantities.
         mujoco.mj_forward(self.model, self.data)
         for _ in range(int(0.2 / self.model.opt.timestep)):  # To pop the cube off the floor (TODO: not ideal).
             mujoco.mj_step(self.model, self.data)
-
-        # Update visualization.
-        self.model.geom("target_region").pos = self.target_pos[:]
 
         return self.get_observation(), {}
 
