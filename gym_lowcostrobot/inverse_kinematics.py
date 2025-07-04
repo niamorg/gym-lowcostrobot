@@ -68,6 +68,16 @@ def inverse_kinematics(
 
 
 
+# ------------------------------- TEST SECTION ------------------------------- #
+
+def set_home(model: mujoco.MjModel, data: mujoco.MjData):
+    mujoco.mj_resetData(model, data)
+    data.qpos[:] = model.keyframe("home").qpos
+    data.qvel[:] = model.keyframe("home").qvel
+    data.ctrl[:] = model.keyframe("home").ctrl
+    mujoco.mj_forward(model, data)
+
+
 # Test (LLM generated): Check that IK has no side effects on the 
 # simulation state and that it is correct.
 def test_inverse_kinematics():
@@ -82,7 +92,7 @@ def test_inverse_kinematics():
     
     model = mujoco.MjModel.from_xml_path(model_path)
     data = mujoco.MjData(model)
-    mujoco.mj_forward(model, data)
+    set_home(model, data)
     
     # Store initial state (full mujoco simulation state)
     initial_qpos = data.qpos.copy()
@@ -218,5 +228,138 @@ def test_inverse_kinematics():
     print(f"{'='*50}")
 
 
+# Thorough test of IK correctness, which includes a study on the time it takes the robot
+# to converge to the target position, with plots and optional visualization.
+def test_ik_time_to_convergence_with_plots_and_viz(viz=False):
+    print("\n=== IK Time to Convergence with Plot ===")
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import mujoco.viewer
+    import time
+
+    model = mujoco.MjModel.from_xml_path("/home/romain/github/gym-lowcostrobot/gym_lowcostrobot/assets/low_cost_robot_6dof/arm_and_balls_scene.xml")
+    # model.opt.timestep = 0.01
+    data = mujoco.MjData(model)
+    set_home(model, data)
+
+    if viz:
+        viewer = mujoco.viewer.launch_passive(model, data)
+        viewer.cam.azimuth = -65.0
+        viewer.cam.distance = 0.8
+        viewer.cam.elevation = -20.0
+        viewer.cam.lookat = np.array([0.0, 0.0, 0.0])
+    
+    rng = np.random.default_rng(2)
+
+    ee_site = "end_effector_site"
+    radius = 0.03
+    n_init_positions = 10
+    n_samples_per_pos = 100
+    n_steps = round(1 / model.opt.timestep)
+    tolerances = [0.002, 0.005, 0.01]  # 2mm, 5mm, 10mm
+
+    all_errors = []
+    for pos_idx in range(n_init_positions):
+        sampled_ee_pos = rng.uniform(low=[-0.15, 0.05, 0.0], high=[0.15, 0.20, 0.30], size=3)
+        random_joint_vel = rng.uniform(low=-2.0, high=2.0, size=5)
+        
+        print(f"\n--- Initial Position {pos_idx+1} {sampled_ee_pos=} {random_joint_vel=}---")
+        print(f"distance sampled_ee_pos to default ee_pos: {np.linalg.norm(data.site(ee_site).xpos.copy() - sampled_ee_pos)}")
+
+        joint_positions, metrics = inverse_kinematics(model, data, sampled_ee_pos, extra_metrics=True, max_iter=1000, tolerance_err=0.05, lm_damping=0.1)
+        if not metrics["success"]:
+            print(f"Initial position {pos_idx+1} IK failed: {metrics}, error: {np.linalg.norm(metrics['error'])}")
+            continue
+
+        for sample_idx in range(n_samples_per_pos):
+            set_home(model, data)
+            data.qpos[:] = np.append(joint_positions, 0.0)
+            data.qvel[:] = np.append(random_joint_vel, 0.0)
+            mujoco.mj_forward(model, data)
+            initial_ee_pos = data.site(ee_site).xpos.copy()
+
+            if viz and sample_idx == 0:
+                model.geom("red_ball").pos[:] = initial_ee_pos
+                mujoco.mj_forward(model, data)
+                viewer.sync()
+                time.sleep(model.opt.timestep)
+
+            while True:
+                while np.linalg.norm(offset := rng.uniform(-radius, radius, size=3)) > radius: pass
+                sampled_ee_pos = initial_ee_pos + offset
+            
+                # Run IK to get target joint positions
+                target_joint_pos, metrics = inverse_kinematics(model, data, sampled_ee_pos, extra_metrics=True)
+                if not metrics["success"]:
+                    print(f"    [Sample {sample_idx+1}] IK failed: {metrics["error"].round(4)}, error: {np.linalg.norm(metrics['error'])} offset:{np.linalg.norm(offset)}")
+                ik_ee_pos = sampled_ee_pos - metrics["error"]
+                break
+
+            # update position of yellow ball
+            if viz and sample_idx % 10 == 0:
+                model.geom("yellow_ball").pos[:] = ik_ee_pos
+                mujoco.mj_forward(model, data)
+                viewer.sync()
+
+            # Simulate for 1000 steps
+            data.ctrl[:] = np.append(target_joint_pos, 0.0)
+            
+            errors = []
+            for t in range(n_steps):
+                mujoco.mj_step(model, data)
+                mujoco.mj_forward(model, data)
+                if viz and sample_idx % 10 == 0:
+                    model.geom("green_ball").pos[:] = data.site(ee_site).xpos.copy()
+                    mujoco.mj_forward(model, data)
+                    viewer.sync()
+                    time.sleep(model.opt.timestep)
+                # print("data.qvel", data.qvel.round(2))
+                ee_now = data.site(ee_site).xpos.copy()
+                err = np.linalg.norm(ee_now - ik_ee_pos)
+                errors.append(err)
+            
+            all_errors.append(np.array(errors))
+
+    all_errors = np.array(all_errors)  # shape: [n_runs, n_steps]
+    print(all_errors.shape)
+    n_runs = all_errors.shape[0]
+
+    # Compute scores
+    for tolerance in tolerances:
+        n_success = np.sum(np.any(all_errors < tolerance, axis=1))
+        print(f"\nTotal runs: {n_runs}, Successes (error < {tolerance*1000:.1f}mm): {n_success} ({n_success/n_runs*100:.1f}%)")
+
+    # Plot
+    prop_reached = []
+    for tolerance in tolerances:
+        # For each time step, proportion of runs that have reached within tolerance
+        reached = (all_errors < tolerance)  # shape: [n_runs, n_steps]
+        prop_reached.append(np.mean(reached, axis=0))  # [n_steps]
+        print(prop_reached[-1].shape)
+
+    plt.figure(figsize=(8, 4))
+    for tolerance, prop in zip(tolerances, prop_reached):
+        plt.plot(np.arange(n_steps) * model.opt.timestep * 1000, prop, label=f"Proportion within {tolerance*1000:.1f}mm")
+    plt.xlabel("Time (ms)")
+    plt.ylabel("Proportion of runs within tolerance")
+    plt.title("IK Reachability: Proportion of runs reaching target vs. time")
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(np.arange(n_steps) * model.opt.timestep * 1000, 1000 * all_errors.mean(axis=0), label="Average error")
+    plt.xlabel("Time (ms)")
+    plt.ylabel("Average error (mm)")
+    plt.title("IK Reachability: Average error vs. time")
+    plt.grid(True)
+    plt.legend()
+
+    plt.show()
+    print("\n=== End of IK Reachability with Plot ===\n")
+    if viz:
+        viewer.close()
+
 if __name__ == "__main__":
     test_inverse_kinematics()
+    test_ik_time_to_convergence_with_plots_and_viz(viz=True)
