@@ -35,5 +35,9 @@
       <geom name="target_region" type="cylinder" pos=".06 .135 0.005" size="0.035 0.01" rgba="0 0 1 0.3"  contype="0" conaffinity="0" />
 	  
     </worldbody>
+
+  <!-- <keyframe>
+    <key name="reset" qpos="0 0 0 0 0 0 0.0 0.2 0.01 1 0 0 0" ctrl="0 0 0 0 0 0" qvel="0 0 0 0 0 0 0 0 0 0 0 0"/>
+  </keyframe> -->
   
   </mujoco>

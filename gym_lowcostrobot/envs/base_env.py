@@ -84,10 +84,13 @@ class BaseEnv(gym.Env):
         elif self.action_mode == "joint":
             raise NotImplementedError("Joint action mode not implemented.")
 
-        for _ in range(self.mujoco_steps):
-            mujoco.mj_step(self.model, self.data)
-            if self.render_mode == "human":
+        if self.render_mode == "human":
+            for _ in range(self.mujoco_steps):
+                mujoco.mj_step(self.model, self.data)
                 self.viewer.sync()
+        else:
+            mujoco.mj_step(self.model, self.data, nstep=self.mujoco_steps)
+
         mujoco.mj_forward(self.model, self.data)
 
 
@@ -108,13 +111,18 @@ class BaseEnv(gym.Env):
 
         return observation
 
-
     def reset(self, seed=None, options=None):
         super().reset(seed=seed, options=options)
-        obs, info = self._reset()
+
+        mujoco.mj_resetData(self.model, self.data)
+        mujoco.mj_forward(self.model, self.data)
+
+        info = self._reset()
+
         if self.render_mode == "human":
             self.viewer.sync()
-        return obs, info
+        
+        return self.get_observation(), info
     
 
     def render(self):
@@ -137,6 +145,9 @@ class BaseEnv(gym.Env):
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         raise NotImplementedError
 
-    def _reset(self) -> tuple[np.ndarray, dict]:
+    def get_observation(self) -> dict[str, np.ndarray] | np.ndarray:
+        raise NotImplementedError
+
+    def _reset(self) -> dict:
         raise NotImplementedError
 # --------------------------- #

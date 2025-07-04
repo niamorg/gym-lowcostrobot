@@ -8,8 +8,8 @@ class MyReachCubeEnv(BaseEnv):
     CUBE_SPAWN_ZONE_MIN = np.array([-0.15, 0.015, 0])
     CUBE_SPAWN_ZONE_MAX = np.array([0.15, 0.20, 0])
 
-    def __init__(self, distance_threshold=0.05, **kwargs):
-        super().__init__(model_path="reach_cube.xml", **kwargs)
+    def __init__(self, distance_threshold=0.05, block_gripper=True, **kwargs):
+        super().__init__(model_path="reach_cube.xml", block_gripper=block_gripper, **kwargs)
         self.initial_joint_pos = np.zeros_like(self.joint_pos)
         self.distance_threshold = distance_threshold
         
@@ -32,19 +32,18 @@ class MyReachCubeEnv(BaseEnv):
         return obs
 
 
-    def _reset(self) -> tuple[np.ndarray, dict]:
-        self.joint_pos[:] = self.initial_joint_pos
- 
+    def _reset(self) -> dict: 
         # Sample cube positions.
         self.cube_pos[:] = self.np_random.uniform(self.CUBE_SPAWN_ZONE_MIN, self.CUBE_SPAWN_ZONE_MAX)
         self.cube_quat[:] = np.array([1.0, 0.0, 0.0, 0.0])
-
+        
         # Set derived quantities.
         mujoco.mj_forward(self.model, self.data)
-        for _ in range(int(0.2 / self.model.opt.timestep)):  # To pop the cube off the floor (TODO: not ideal).
-            mujoco.mj_step(self.model, self.data)
 
-        return self.get_observation(), {}
+        # Pop the cube off the floor by advancing the simulation 1s. (TODO: not ideal).
+        mujoco.mj_step(self.model, self.data, int(1 / self.model.opt.timestep))
+
+        return {}
 
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
@@ -60,6 +59,6 @@ class MyReachCubeEnv(BaseEnv):
         reward = 1 - np.maximum(0, (ee_to_cube - self.distance_threshold) / 0.5)
 
         if reached := (reward == 1):
-            reward = 100
+            reward = 10.0 # 100.0 before
 
         return reward, {"reached": reached}
