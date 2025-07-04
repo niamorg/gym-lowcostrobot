@@ -43,6 +43,8 @@ class MyReachCubeEnv(BaseEnv):
         # Pop the cube off the floor by advancing the simulation 1s. (TODO: not ideal).
         mujoco.mj_step(self.model, self.data, int(1 / self.model.opt.timestep))
 
+        self.count = 0
+
         return {}
 
 
@@ -50,6 +52,9 @@ class MyReachCubeEnv(BaseEnv):
         self.apply_action(action)
 
         reward, info = self.compute_reward()
+
+        self.count = int(info["reached"]) * (self.count + 1)
+        info["is_success"] = (self.count >= 5)
 
         return self.get_observation(), reward, False, False, info
 
