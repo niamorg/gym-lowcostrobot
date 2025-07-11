@@ -16,6 +16,7 @@ class BaseEnv(gym.Env):
         self,
         model_path: str,
         observation_cameras: list[str] = [],
+        observation_images_shape: tuple[int, int] = (96, 96),
         action_mode: str = "ee",
         block_gripper: bool = False,
         mujoco_steps: int = 100,
@@ -48,10 +49,11 @@ class BaseEnv(gym.Env):
         }
         self.cameras = [cam.split('_')[1] for cam in observation_cameras]
         for cam in self.cameras:
-            observation_subspaces[f'image_{cam}'] = Box(0, 255, shape=(240, 320, 3), dtype=np.uint8)
+            observation_subspaces[f'image_{cam}'] = Box(0, 255, shape=(3, *observation_images_shape), dtype=np.uint8)
 
+        self.observation_images_shape = observation_images_shape
         if self.cameras:
-            self.renderer = mujoco.Renderer(self.model)
+            self.renderer = mujoco.Renderer(self.model, height=observation_images_shape[0], width=observation_images_shape[1])
 
         self.observation_space = Dict(observation_subspaces)
 
@@ -107,9 +109,10 @@ class BaseEnv(gym.Env):
         }
         for cam in self.cameras:
             self.renderer.update_scene(self.data, camera=f"camera_{cam}")
-            observation[f"image_{cam}"] = self.renderer.render()
+            observation[f"image_{cam}"] = self.renderer.render().transpose(2, 0, 1)  # (H, W, C) -> (C, H, W)
 
         return observation
+
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed, options=options)
