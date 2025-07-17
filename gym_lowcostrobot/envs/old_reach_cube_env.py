@@ -9,7 +9,7 @@ from gymnasium import Env, spaces
 from gym_lowcostrobot import ASSETS_PATH
 
 
-class ReachCubeEnv(Env):
+class OldReachCubeEnv(Env):
     """
     ## Description
 

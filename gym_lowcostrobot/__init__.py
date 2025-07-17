@@ -8,13 +8,13 @@ ASSETS_PATH = os.path.join(os.path.dirname(__file__), "assets", "low_cost_robot_
 
 register(
     id="MyPushCube-v0",
-    entry_point="gym_lowcostrobot.envs:MyPushCubeEnv",
-    max_episode_steps=50,
+    entry_point="gym_lowcostrobot.envs:PushCubeEnv",
+    max_episode_steps=25,
 )
 
 register(
     id="MyReachCube-v0",
-    entry_point="gym_lowcostrobot.envs:MyReachCubeEnv",
+    entry_point="gym_lowcostrobot.envs:ReachCubeEnv",
     max_episode_steps=20,
 )
 
@@ -31,14 +31,14 @@ register(
 )
 
 register(
-    id="PushCube-v0",
-    entry_point="gym_lowcostrobot.envs:PushCubeEnv",
+    id="OldPushCube-v0",
+    entry_point="gym_lowcostrobot.envs:OldPushCubeEnv",
     max_episode_steps=50,
 )
 
 register(
-    id="ReachCube-v0",
-    entry_point="gym_lowcostrobot.envs:ReachCubeEnv",
+    id="OldReachCube-v0",
+    entry_point="gym_lowcostrobot.envs:OldReachCubeEnv",
     max_episode_steps=50,
 )
 

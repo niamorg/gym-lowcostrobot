@@ -3,7 +3,7 @@ from gymnasium.spaces import Box
 import numpy as np
 import mujoco
 
-class MyPushCubeEnv(BaseEnv):
+class PushCubeEnv(BaseEnv):
 
     CUBE_SPAWN_ZONE_MIN = np.array([-0.15, 0.015, 0])
     CUBE_SPAWN_ZONE_MAX = np.array([0.15, 0.20, 0])
