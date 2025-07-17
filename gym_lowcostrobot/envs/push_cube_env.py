@@ -12,7 +12,7 @@ class PushCubeEnv(BaseEnv):
     WORK_ZONE_MIN = np.array([-0.30, -0.20])
     WORK_ZONE_MAX = np.array([0.30, 0.23])
 
-    def __init__(self, distance_threshold=0.05, episodic=True, block_gripper=True, **kwargs):
+    def __init__(self, distance_threshold=0.05, episodic=False, block_gripper=True, **kwargs):
         super().__init__(model_path="push_cube.xml", block_gripper=block_gripper, **kwargs)
         self.initial_joint_pos = np.zeros_like(self.joint_pos)
         self.distance_threshold = distance_threshold
@@ -70,7 +70,7 @@ class PushCubeEnv(BaseEnv):
 
         in_work_zone = np.all(self.WORK_ZONE_MIN < self.cube_pos[:2]) and np.all(self.cube_pos[:2] < self.WORK_ZONE_MAX)
 
-        terminated = (info["is_success"] or not in_work_zone) if self.episodic else False
+        terminated = bool(info["is_success"] or not in_work_zone) if self.episodic else False
 
         return self.get_observation(), reward, terminated, False, info
 
@@ -102,31 +102,36 @@ def test_push_cube_env(render_mode=None):
     import time
     import numpy as np
 
-    env = gym.make("MyPushCube-v0", render_mode=render_mode)
+    env = gym.make("PushCube-v0", render_mode=render_mode, max_episode_steps=50)
     env.action_space.seed(0)
     for seed in [0,1]:
-        print(f"Seed: {seed}")
+        print(f"\n ------ Seed: {seed} {"random" if seed == 0 else "ee towards cube"} ------")
         env.reset(seed=seed)
-        for _ in range(10 * (5 * seed + 1)):
-            obs, reward, terminated, truncated, info = env.step(env.action_space.sample() if seed == 0 else (env.unwrapped.cube_pos - env.unwrapped.ee_pos).astype(np.float32))
-            print(reward, 2, terminated, info["reaching_reward"], info["pushing_reward"], {k:round(float(v),2) for k,v in info.items()})
+        for _ in range(10 * (4 * seed + 1)):
+            action = env.action_space.sample() if seed == 0 else (env.unwrapped.cube_pos - env.unwrapped.ee_pos).astype(np.float32)
+            obs, reward, terminated, truncated, info = env.step(action)
+            print(f"{terminated=} {reward=:.5f}", {k:(round(float(v),5) if isinstance(v, np.floating) else int(v)) for k,v in info.items()})
             if render_mode == "human":
                 time.sleep(0.01)
     
-    print("--- Test pushing reward ---")
-    env.reset(seed=0)
-    cube_init_pos = env.unwrapped.data.qpos[6:6+3].copy()
-    target_pos = env.unwrapped.target_pos.copy()
-    for t in np.linspace(0, 1, 10):
-        env.unwrapped.data.qpos[6:6+3] = cube_init_pos + t * (target_pos - cube_init_pos)
-        mujoco.mj_forward(env.unwrapped.model, env.unwrapped.data)
-        obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
-        print(np.round(reward, 2), terminated, {k:round(float(v),2) for k,v in info.items()})
-        if render_mode == "human":
-            time.sleep(0.1) 
-    env.close()
-
+    for episodic in [False, True]:
+        print(f"--- Test pushing reward episodic={episodic} ---")
+        if episodic:
+            env = gym.make("PushCube-v0", render_mode=render_mode, episodic=True)
+        env.reset(seed=0)
+        cube_init_pos = env.unwrapped.data.qpos[6:6+3].copy()
+        target_pos = env.unwrapped.target_pos.copy()
+        for t in np.linspace(0, 1, 10):
+            env.unwrapped.data.qpos[6:6+3] = cube_init_pos + t * (target_pos - cube_init_pos)
+            mujoco.mj_forward(env.unwrapped.model, env.unwrapped.data)
+            obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
+            print(f"{terminated=} {reward=:.5f}", {k:(round(float(v),5) if isinstance(v, np.floating) else int(v)) for k,v in info.items()})
+            if render_mode == "human":
+                time.sleep(0.1)
+            if terminated or truncated:
+                break
+        env.close()
 
 if __name__ == "__main__":
-    test_push_cube_env(render_mode="human")
+    test_push_cube_env(render_mode=None)
 # ---------------------------------------------------------------------------- #

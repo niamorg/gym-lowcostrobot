@@ -7,13 +7,13 @@ __version__ = "0.0.1"
 ASSETS_PATH = os.path.join(os.path.dirname(__file__), "assets", "low_cost_robot_6dof")
 
 register(
-    id="MyPushCube-v0",
+    id="PushCube-v0",
     entry_point="gym_lowcostrobot.envs:PushCubeEnv",
     max_episode_steps=25,
 )
 
 register(
-    id="MyReachCube-v0",
+    id="ReachCube-v0",
     entry_point="gym_lowcostrobot.envs:ReachCubeEnv",
     max_episode_steps=20,
 )
