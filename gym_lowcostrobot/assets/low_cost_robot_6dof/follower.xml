@@ -88,7 +88,7 @@
                 <geom mesh="link_5_motor" class="visual" material="black"/>
                 <geom mesh="link_5_collision" class="finger"/>
       
-                <site name="end_effector_site" pos="-0.06429 0.00327 0.0011" quat="1 0 0 0"/>
+                <site name="end_effector_site" pos="-0.06429 0.00327 0.0011" quat="0 0 0 -1"/>
                 <camera name="camera_end_effector" fovy="100" pos="-0.05 0.005 0.05" quat="0.65745126 0.26030337 0.26030337 0.65745126"/>
 
                 <body name="link_6" pos="-0.01315 -0.0075 0.0145">
@@ -115,7 +115,7 @@
       <position class="follower" name="joint_2" joint="joint_2" kp="100" kv="10" forcerange="-150 150"/>
       <position class="follower" name="joint_3" joint="joint_3" kp="100" kv="10" forcerange="-150 150"/>
       <position class="follower" name="joint_4" joint="joint_4" kp="100" kv="10" forcerange="-150 150"/>
-      <position class="follower" name="joint_5" joint="joint_5" kp="10" kv="1" forcerange="-10 10"/>
+      <position class="follower" name="joint_5" joint="joint_5" kp="100" kv="10" forcerange="-100 100"/>
       <position class="follower" name="joint_6" joint="joint_6" kp="10" kv="1" forcerange="-2 2"/>
   </actuator>
 

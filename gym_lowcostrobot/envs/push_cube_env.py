@@ -110,10 +110,15 @@ def test_push_cube_env(render_mode=None):
         for _ in range(10 * (4 * seed + 1)):
             action = env.action_space.sample() if seed == 0 else (env.unwrapped.cube_pos - env.unwrapped.ee_pos).astype(np.float32)
             obs, reward, terminated, truncated, info = env.step(action)
-            print(f"{terminated=} {reward=:.5f}", {k:(round(float(v),5) if isinstance(v, np.floating) else int(v)) for k,v in info.items()})
+            # print(f"{terminated=} {reward=:.5f}", {k:(round(float(v),5) if isinstance(v, np.floating) else int(v)) for k,v in info.items()})
             if render_mode == "human":
                 time.sleep(0.01)
-    
+        if seed == 1:
+            assert info["reached"], "The end-effector should have reached the cube."
+            print("="*100)
+            print("✓ TEST: Reaching reward: passed")
+            print("="*100)
+
     for episodic in [False, True]:
         print(f"--- Test pushing reward episodic={episodic} ---")
         if episodic:
@@ -125,12 +130,17 @@ def test_push_cube_env(render_mode=None):
             env.unwrapped.data.qpos[6:6+3] = cube_init_pos + t * (target_pos - cube_init_pos)
             mujoco.mj_forward(env.unwrapped.model, env.unwrapped.data)
             obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
-            print(f"{terminated=} {reward=:.5f}", {k:(round(float(v),5) if isinstance(v, np.floating) else int(v)) for k,v in info.items()})
+            # print(f"{terminated=} {reward=:.5f}", {k:(round(float(v),5) if isinstance(v, np.floating) else int(v)) for k,v in info.items()})
             if render_mode == "human":
                 time.sleep(0.1)
             if terminated or truncated:
+                assert info["on_target"], "The cube should have been on the target."
                 break
+        assert info["on_target"], "The cube should have been on the target."
         env.close()
+    print("="*100)
+    print("✓ TEST: Pushing reward: passed")
+    print("="*100)
 
 if __name__ == "__main__":
     test_push_cube_env(render_mode=None)

@@ -6,7 +6,9 @@ import numpy as np
 from gymnasium.spaces import Box, Dict
 
 from gym_lowcostrobot import ASSETS_PATH
-from gym_lowcostrobot.inverse_kinematics import inverse_kinematics
+from gym_lowcostrobot.inverse_kinematics import InverseKinematicsZYYYX, damped_least_squares_ik
+from gym_lowcostrobot.utils import wrap_neg_pi_pi, rotmat_to_eulers
+
 
 class BaseEnv(gym.Env):
 
@@ -26,6 +28,7 @@ class BaseEnv(gym.Env):
     ):
         self.model = mujoco.MjModel.from_xml_path(os.path.join(ASSETS_PATH, model_path))
         self.data = mujoco.MjData(self.model)
+        self.ik = InverseKinematicsZYYYX(self.model)
 
         # Simulation parameters.
         self.model.opt.timestep = mujoco_timestep
@@ -33,7 +36,7 @@ class BaseEnv(gym.Env):
         self.metadata["render_fps"] = round(1 / (mujoco_timestep * mujoco_steps))
 
         # (Base) action space.
-        assert action_mode in ["ee", "joint"], f"Invalid action mode: {action_mode}."
+        assert action_mode in ["ee", "ee_pose", "joint"], f"Invalid action mode: {action_mode}."
         self.action_mode = action_mode
         self.block_gripper = block_gripper
         action_shape = (3 if action_mode == "ee" else 5) + int(not block_gripper)
@@ -44,8 +47,14 @@ class BaseEnv(gym.Env):
         observation_subspaces = {
             'joint_pos': Box(low=-np.pi, high=np.pi, shape=(self.num_dof,)),
             'joint_vel': Box(low=-np.inf, high=np.inf, shape=(self.num_dof,)),
+            'gripper': Box(low=-np.inf, high=np.inf),    # TODO: (niamorg) range
             'ee_pos': Box(low=-np.inf, high=np.inf, shape=(3,)),
             'ee_vel': Box(low=-np.inf, high=np.inf, shape=(3,)),
+            'ee_quat': Box(low=-1.0, high=1.0, shape=(4,)),
+            'ee_roll': Box(low=-np.pi, high=np.pi),
+            'ee_pitch': Box(low=-np.pi/2, high=np.pi/2),
+            'ee_yaw': Box(low=-np.pi, high=np.pi),
+            # 'ee_axis_angle': Box(low=-np.inf, high=np.inf, shape=(3,)),
         }
         self.cameras = [cam.split('_')[1] for cam in observation_cameras]
         for cam in self.cameras:
@@ -60,6 +69,7 @@ class BaseEnv(gym.Env):
         # Some aliases (views of arrays).
         self.ee_id = self.model.site(end_effector_site).id
         self.ee_pos = self.data.site(self.ee_id).xpos
+        self.ee_rot = self.data.site(self.ee_id).xmat.reshape(3,3)
         self.joint_pos = self.data.qpos[:self.num_dof]  # qpos = [q1, q2, q3, q4, q5, gripper, ...]
         self.joint_vel = self.data.qvel[:self.num_dof]  # qvel = [dq1, dq2, dq3, dq4, dq5, dgripper, ...]
 
@@ -80,7 +90,22 @@ class BaseEnv(gym.Env):
             ee_action = action[:3]
             target_ee_pos = self.ee_pos + ee_action * 0.05
             # target_ee_pos[2] = np.maximum(0, target_ee_pos[2]) # TODO: ROMAIN: questionable...
-            self.data.ctrl[:-1] = inverse_kinematics(self.model, self.data, target_ee_pos, self.ee_id)
+            self.data.ctrl[:-1] = damped_least_squares_ik(self.model, self.data, target_ee_pos, self.ee_id)
+            self.data.ctrl[-1] = np.clip(np.pi * action[-1], *self.model.jnt_range[-1].T) if not self.block_gripper else 0.0
+
+        elif self.action_mode == "ee_pose":
+            dxee, droll, dpitch = action[:3], action[3], action[4]
+            
+            target_ee_pos = self.ee_pos + dxee * 0.04
+            target_ee_pos[2] = np.maximum(0, target_ee_pos[2])
+
+            roll, pitch, _ = rotmat_to_eulers(self.ee_rot)
+            target_roll, target_pitch = wrap_neg_pi_pi(roll + 0.28 * droll), pitch + 0.28 * dpitch    # 16° max.
+            if np.abs(target_pitch) > np.pi/2:
+                target_pitch = np.sign(target_pitch) * np.pi - target_pitch
+
+            joints, _ = self.ik.solve(target_ee_pos, target_roll, target_pitch)
+            self.data.ctrl[:-1] = joints
             self.data.ctrl[-1] = np.clip(np.pi * action[-1], *self.model.jnt_range[-1].T) if not self.block_gripper else 0.0
 
         elif self.action_mode == "joint":
@@ -101,11 +126,18 @@ class BaseEnv(gym.Env):
         mujoco.mj_jacSite(self.model, self.data, jacp, jacr, self.ee_id)
         ee_vel = jacp[:,:5] @ self.data.qvel[:5]
 
+        mujoco.mju_mat2Quat(ee_quat := np.empty(4), self.ee_rot.reshape(9))
+        roll, pitch, yaw = rotmat_to_eulers(self.ee_rot)
         observation = {
             "joint_pos": self.joint_pos.astype(np.float32),
             "joint_vel": self.joint_vel.astype(np.float32),
+            "gripper": np.array([self.joint_pos[-1]], dtype=np.float32),
             "ee_pos": self.ee_pos.astype(np.float32),
             "ee_vel": ee_vel.astype(np.float32),
+            "ee_quat": ee_quat.astype(np.float32),
+            "ee_roll": np.array([roll], dtype=np.float32),
+            "ee_pitch": np.array([pitch], dtype=np.float32),
+            "ee_yaw": np.array([yaw], dtype=np.float32),
         }
         for cam in self.cameras:
             self.renderer.update_scene(self.data, camera=f"camera_{cam}")
