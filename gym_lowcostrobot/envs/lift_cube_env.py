@@ -20,6 +20,7 @@ class LiftCubeEnv(BaseEnv):
         self.observation_space.spaces['cube_pos'] = Box(low=-np.inf, high=np.inf, shape=(3,))
         self.observation_space.spaces['cube_vel'] = Box(low=-np.inf, high=np.inf, shape=(3,))
         self.observation_space.spaces['ee_to_cube'] = Box(low=-np.inf, high=np.inf, shape=(3,))
+        self.observation_space.spaces['cube_height'] = Box(low=-np.inf, high=np.inf, shape=(1,))
 
         # Some aliases (views of arrays).
         self.cube_pos = self.data.qpos[6:6+3]
@@ -32,6 +33,7 @@ class LiftCubeEnv(BaseEnv):
         obs['cube_pos'] = self.cube_pos.astype(np.float32)
         obs['cube_vel'] = self.cube_vel.astype(np.float32)
         obs['ee_to_cube'] = (self.cube_pos - self.ee_pos).astype(np.float32)
+        obs['cube_height'] = np.array([self.cube_pos[2]], dtype=np.float32)
         return obs
 
 
