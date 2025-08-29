@@ -73,6 +73,11 @@ class BaseEnv(gym.Env):
         self.joint_pos = self.data.qpos[:self.num_dof]  # qpos = [q1, q2, q3, q4, q5, gripper, ...]
         self.joint_vel = self.data.qvel[:self.num_dof]  # qvel = [dq1, dq2, dq3, dq4, dq5, dgripper, ...]
 
+        # TODO(niamorg): change this:
+        joint_min = np.array([-3.14159, -1.5708, -1.48353, -1.91986, -2.96706, -1.74533])
+        joint_max = np.array([3.14159, 1.22173, 1.74533, 1.91986, 2.96706, 0.0523599])
+        self.joint_limits = np.vstack((joint_min, joint_max))
+
         # Render utilities.
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -89,9 +94,8 @@ class BaseEnv(gym.Env):
         if self.action_mode == "ee":
             ee_action = action[:3]
             target_ee_pos = self.ee_pos + ee_action * 0.05
-            # target_ee_pos[2] = np.maximum(0, target_ee_pos[2]) # TODO: ROMAIN: questionable...
+            # target_ee_pos[2] = np.maximum(0, target_ee_pos[2]) # TODO(niamorg): questionable...
             self.data.ctrl[:-1] = damped_least_squares_ik(self.model, self.data, target_ee_pos, self.ee_id)
-            self.data.ctrl[-1] = np.clip(np.pi * action[-1], *self.model.jnt_range[-1].T) if not self.block_gripper else 0.0
 
         elif self.action_mode == "ee_pose":
             dxee, droll, dpitch = action[:3], action[3], action[4]
@@ -102,14 +106,17 @@ class BaseEnv(gym.Env):
             roll, pitch, _ = rotmat_to_eulers(self.ee_rot)
             target_roll, target_pitch = wrap_neg_pi_pi(roll + 0.28 * droll), pitch + 0.28 * dpitch    # 16° max.
             if np.abs(target_pitch) > np.pi/2:
-                target_pitch = np.sign(target_pitch) * np.pi - target_pitch
+                target_pitch = np.sign(target_pitch) * np.pi - target_pitch  # remap to [-pi/2, pi/2]
 
             joints, _ = self.ik.solve(target_ee_pos, target_roll, target_pitch)
             self.data.ctrl[:-1] = joints
-            self.data.ctrl[-1] = np.clip(np.pi * action[-1], *self.model.jnt_range[-1].T) if not self.block_gripper else 0.0
 
         elif self.action_mode == "joint":
-            raise NotImplementedError("Joint action mode not implemented.")
+            djoints = action[:5] * np.deg2rad(20.0)  # 20° max.
+            self.data.ctrl[:-1] = np.clip(self.joint_pos[:5] + djoints, *self.joint_limits[:,:5])
+
+        dgripper = action[-1] * np.deg2rad(20.0)  # 20° max.
+        self.data.ctrl[-1] = np.clip(self.joint_pos[-1] + dgripper, *self.joint_limits[:,-1]) if not self.block_gripper else 0.0
 
         if self.render_mode == "human":
             for _ in range(self.mujoco_steps):
